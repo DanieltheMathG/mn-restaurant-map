@@ -1,0 +1,1158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>DineRoute MN - Personal Restaurant Map</title>
+
+    <!-- iOS PWA Meta Tags -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="DineRoute">
+    <link rel="apple-touch-icon" href="https://img.icons8.com/emoji/192/fork-and-knife-with-plate-emoji.png">
+    <meta name="theme-color" content="#10B981">
+
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        ios: {
+                            bg: '#F2F2F7',
+                            card: '#FFFFFF',
+                            darkBg: '#000000',
+                            darkCard: '#1C1C1E',
+                            accent: '#10B981',
+                            blue: '#007AFF'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- Leaflet Maps CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+        }
+
+        /* Support for iOS Safe Area Insets */
+        .safe-pb {
+            padding-bottom: calc(1.25rem + env(safe-area-inset-bottom, 0px));
+        }
+        .safe-pt {
+            padding-top: calc(0.75rem + env(safe-area-inset-top, 0px));
+        }
+        .safe-top-inset {
+            top: env(safe-area-inset-top, 0px);
+        }
+
+        /* Custom Scrollbars */
+        ::-webkit-scrollbar {
+            width: 4px;
+            height: 4px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(156, 163, 175, 0.5);
+            border-radius: 9999px;
+        }
+
+        /* Leaflet Overrides */
+        .leaflet-container {
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+        }
+        .leaflet-control-zoom {
+            border: none !important;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15) !important;
+            border-radius: 12px !important;
+            overflow: hidden;
+        }
+        .leaflet-control-zoom-in, .leaflet-control-zoom-out {
+            background: #ffffff !important;
+            color: #111827 !important;
+            border: none !important;
+        }
+        .dark .leaflet-control-zoom-in, .dark .leaflet-control-zoom-out {
+            background: #1F2937 !important;
+            color: #F9FAFB !important;
+        }
+
+        /* Animated Slot Machine Effect */
+        @keyframes slotSpin {
+            0% { transform: translateY(0); }
+            50% { transform: translateY(-30%); }
+            100% { transform: translateY(0); }
+        }
+        .slot-spinning {
+            animation: slotSpin 0.15s infinite ease-in-out;
+        }
+    </style>
+</head>
+<body class="bg-ios-bg dark:bg-ios-darkBg text-gray-900 dark:text-gray-100 h-screen w-screen overflow-hidden flex flex-col antialiased">
+
+    <!-- Top Header Bar -->
+    <header class="bg-white/80 dark:bg-gray-900/80 backdrop-blur-md border-b border-gray-200 dark:border-gray-800 safe-pt px-4 pb-3 flex items-center justify-between z-30 shrink-0">
+        <div class="flex items-center space-x-2">
+            <div class="bg-emerald-500 text-white p-1.5 rounded-xl shadow-sm">
+                <i class="fa-solid font-bold fa-utensils text-lg w-5 h-5 flex items-center justify-center"></i>
+            </div>
+            <div>
+                <h1 class="font-bold text-lg leading-tight tracking-tight">DineRoute <span class="text-xs bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 px-1.5 py-0.5 rounded-md font-semibold">MN Edition</span></h1>
+                <p id="locationStatusText" class="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[200px]">Locating current position...</p>
+            </div>
+        </div>
+        <div class="flex items-center space-x-2">
+            <button onclick="openInfoModal()" class="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 active:scale-95 transition-transform" title="API & Setup Info">
+                <i class="fa-solid fa-circle-info text-base"></i>
+            </button>
+            <button onclick="openModal('editModal')" class="bg-emerald-600 text-white px-3 py-1.5 rounded-full font-medium text-xs shadow-sm flex items-center space-x-1 active:scale-95 transition-transform">
+                <i class="fa-solid fa-plus text-xs"></i>
+                <span>Add Spot</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- Global Quick Mode & Travel Time Filter Bar -->
+    <section class="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-3 py-2 flex items-center justify-between gap-2 overflow-x-auto z-20 shrink-0 text-xs shadow-xs">
+        <!-- Travel Mode Buttons -->
+        <div class="flex items-center bg-gray-100 dark:bg-gray-800 p-1 rounded-xl shrink-0">
+            <button id="mode-driving" onclick="setTravelMode('driving')" class="px-2.5 py-1 rounded-lg font-medium transition-all text-emerald-600 bg-white dark:bg-gray-700 shadow-xs">
+                <i class="fa-solid fa-car"></i>
+            </button>
+            <button id="mode-biking" onclick="setTravelMode('biking')" class="px-2.5 py-1 rounded-lg font-medium transition-all text-gray-500 dark:text-gray-400">
+                <i class="fa-solid fa-bicycle"></i>
+            </button>
+            <button id="mode-walking" onclick="setTravelMode('walking')" class="px-2.5 py-1 rounded-lg font-medium transition-all text-gray-500 dark:text-gray-400">
+                <i class="fa-solid fa-person-walking"></i>
+            </button>
+        </div>
+
+        <!-- Starting Location Quick Selector -->
+        <div class="flex items-center space-x-1 shrink-0 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-xl">
+            <span class="text-gray-400 text-[10px] uppercase font-bold tracking-wider">From:</span>
+            <select id="startLocationSelect" onchange="handleStartLocationChange()" class="bg-transparent font-medium text-gray-700 dark:text-gray-200 outline-none text-xs cursor-pointer">
+                <option value="gps">GPS Location</option>
+                <option value="home">Home</option>
+                <option value="work">Work</option>
+                <option value="custom">Custom Address...</option>
+            </select>
+        </div>
+
+        <!-- Max Travel Time Filter Pills -->
+        <div class="flex items-center space-x-1 shrink-0 overflow-x-auto no-scrollbar">
+            <span class="text-gray-400 text-[10px] uppercase font-bold tracking-wider">Max:</span>
+            <button onclick="setMaxTravelTime(10)" class="time-filter-pill px-2.5 py-1 rounded-full font-medium border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300" data-time="10">10 min</button>
+            <button onclick="setMaxTravelTime(20)" class="time-filter-pill px-2.5 py-1 rounded-full font-medium border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300" data-time="20">20 min</button>
+            <button onclick="setMaxTravelTime(30)" class="time-filter-pill px-2.5 py-1 rounded-full font-medium border border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 font-bold" data-time="30">30 min</button>
+            <button onclick="setMaxTravelTime(60)" class="time-filter-pill px-2.5 py-1 rounded-full font-medium border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300" data-time="60">60 min</button>
+            <button onclick="setMaxTravelTime(999)" class="time-filter-pill px-2.5 py-1 rounded-full font-medium border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300" data-time="999">Any</button>
+        </div>
+    </section>
+
+    <!-- MAIN CONTENT VIEW AREA -->
+    <main class="flex-1 relative overflow-hidden">
+        
+        <!-- MAP VIEW CONTAINER -->
+        <div id="view-map" class="absolute inset-0 w-full h-full flex flex-col">
+            <div id="map" class="w-full h-full"></div>
+            
+            <!-- Floating Quick Summary Bar -->
+            <div class="absolute bottom-4 left-3 right-3 z-20 bg-white/90 dark:bg-gray-900/90 backdrop-blur-md p-3 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-800 flex items-center justify-between text-xs">
+                <div class="flex items-center space-x-3">
+                    <span class="flex items-center space-x-1"><span class="w-3 h-3 rounded-full bg-emerald-500 inline-block"></span> <span>Want To Try (<span id="count-want">0</span>)</span></span>
+                    <span class="flex items-center space-x-1"><span class="w-3 h-3 rounded-full bg-blue-500 inline-block"></span> <span>Visited (<span id="count-visited">0</span>)</span></span>
+                </div>
+                <button onclick="recenterMap()" class="text-emerald-600 dark:text-emerald-400 font-semibold flex items-center space-x-1">
+                    <i class="fa-solid fa-location-crosshairs"></i>
+                    <span>Recenter</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- LIST VIEW CONTAINER -->
+        <div id="view-list" class="absolute inset-0 w-full h-full bg-ios-bg dark:bg-ios-darkBg overflow-y-auto p-4 hidden">
+            <!-- Search & Filter Controls -->
+            <div class="space-y-3 mb-4">
+                <div class="relative">
+                    <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3 text-gray-400 text-sm"></i>
+                    <input type="text" id="searchInput" oninput="renderRestaurantList()" placeholder="Search name, cuisine, tag or notes..." class="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm shadow-xs focus:ring-2 focus:ring-emerald-500 outline-none">
+                </div>
+
+                <div class="flex items-center justify-between gap-2 text-xs">
+                    <div class="flex items-center space-x-1 overflow-x-auto no-scrollbar py-1">
+                        <button onclick="setStatusFilter('all')" id="status-filter-all" class="px-3 py-1 rounded-lg bg-emerald-600 text-white font-medium">All</button>
+                        <button onclick="setStatusFilter('want')" id="status-filter-want" class="px-3 py-1 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700">Want to Try</button>
+                        <button onclick="setStatusFilter('visited')" id="status-filter-visited" class="px-3 py-1 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700">Visited</button>
+                        <button onclick="toggleOpenNowFilter()" id="open-now-filter-btn" class="px-3 py-1 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700 flex items-center space-x-1">
+                            <i class="fa-regular fa-clock"></i>
+                            <span>Open Now Only</span>
+                        </button>
+                    </div>
+
+                    <select id="sortBySelect" onchange="renderRestaurantList()" class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-xs rounded-lg px-2 py-1 font-medium outline-none">
+                        <option value="travelTime">Sort: Travel Time</option>
+                        <option value="rating">Sort: Rating</option>
+                        <option value="name">Sort: Name</option>
+                        <option value="newest">Sort: Recently Added</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- List Cards -->
+            <div id="restaurantListContainer" class="space-y-3 pb-24">
+                <!-- Cards dynamically loaded here -->
+            </div>
+        </div>
+
+        <!-- PICK FOR ME TAB -->
+        <div id="view-pick" class="absolute inset-0 w-full h-full bg-ios-bg dark:bg-ios-darkBg overflow-y-auto p-4 flex flex-col items-center justify-center text-center hidden">
+            <div class="max-w-md w-full bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-xl border border-gray-100 dark:border-gray-700 space-y-5">
+                <div class="w-16 h-16 bg-emerald-100 dark:bg-emerald-900/50 text-emerald-600 dark:text-emerald-400 rounded-full flex items-center justify-center text-3xl mx-auto shadow-inner">
+                    <i class="fa-solid fa-dice"></i>
+                </div>
+                <div>
+                    <h2 class="text-xl font-bold tracking-tight">Can't Decide What to Eat?</h2>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">We'll pick an unvisited restaurant (<span class="font-semibold text-emerald-600">Want To Try</span>) within your current <span id="pickMaxTimeText" class="font-bold underline">30 min</span> travel limit!</p>
+                </div>
+
+                <!-- Slot Display Box -->
+                <div id="slotDisplay" class="bg-gray-50 dark:bg-gray-900 p-5 rounded-2xl border-2 border-dashed border-emerald-300 dark:border-emerald-800 min-h-[120px] flex flex-col items-center justify-center transition-all">
+                    <p class="text-gray-400 text-sm italic">Tap the spin button to decide!</p>
+                </div>
+
+                <div class="flex items-center space-x-3">
+                    <button id="spinBtn" onclick="runPickForMe()" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-4 rounded-xl shadow-lg active:scale-95 transition-all text-sm flex items-center justify-center space-x-2">
+                        <i class="fa-solid fa-shuffle"></i>
+                        <span>Pick For Me!</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- SETTINGS TAB -->
+        <div id="view-settings" class="absolute inset-0 w-full h-full bg-ios-bg dark:bg-ios-darkBg overflow-y-auto p-4 space-y-4 hidden pb-24">
+            <h2 class="text-lg font-bold">App Settings & Data Backup</h2>
+
+            <!-- Custom Addresses Section -->
+            <div class="bg-white dark:bg-gray-800 p-4 rounded-2xl border border-gray-200 dark:border-gray-700 space-y-3">
+                <h3 class="font-semibold text-sm flex items-center space-x-2">
+                    <i class="fa-solid fa-house text-emerald-600"></i>
+                    <span>Saved Preset Locations</span>
+                </h3>
+                <div>
+                    <label class="text-xs text-gray-500">Home Address</label>
+                    <input type="text" id="settingHomeAddr" placeholder="e.g. 100 S 4th St, Minneapolis, MN" class="w-full text-xs p-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg mt-1 outline-none">
+                </div>
+                <div>
+                    <label class="text-xs text-gray-500">Work Address</label>
+                    <input type="text" id="settingWorkAddr" placeholder="e.g. 200 Park Ave, Saint Paul, MN" class="w-full text-xs p-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg mt-1 outline-none">
+                </div>
+                <button onclick="savePresetLocations()" class="bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-xs px-3 py-2 rounded-lg font-medium active:scale-95 transition-transform">
+                    Save Presets
+                </button>
+            </div>
+
+            <!-- Local Storage Info Card -->
+            <div class="bg-amber-50 dark:bg-amber-950/30 p-4 rounded-2xl border border-amber-200 dark:border-amber-800/50 text-amber-900 dark:text-amber-200 text-xs space-y-2">
+                <div class="flex items-center space-x-2 font-bold">
+                    <i class="fa-solid fa-shield-halved text-amber-600"></i>
+                    <span>Account-Free Privacy Notice</span>
+                </div>
+                <p>All your restaurant notes, ratings, and custom hours are stored locally inside your iPhone's browser storage. Clearing browser cache will erase this data unless you export a backup file.</p>
+            </div>
+
+            <!-- Data Backup & Restore -->
+            <div class="bg-white dark:bg-gray-800 p-4 rounded-2xl border border-gray-200 dark:border-gray-700 space-y-3">
+                <h3 class="font-semibold text-sm flex items-center space-x-2">
+                    <i class="fa-solid fa-database text-blue-500"></i>
+                    <span>Backup & Restore Data</span>
+                </h3>
+                <div class="grid grid-cols-2 gap-2">
+                    <button onclick="exportDataJSON()" class="bg-blue-600 text-white text-xs py-2.5 px-3 rounded-xl font-medium shadow-xs flex items-center justify-center space-x-1.5 active:scale-95 transition-transform">
+                        <i class="fa-solid fa-download"></i>
+                        <span>Export Backup</span>
+                    </button>
+                    <label class="bg-emerald-600 text-white text-xs py-2.5 px-3 rounded-xl font-medium shadow-xs flex items-center justify-center space-x-1.5 cursor-pointer text-center active:scale-95 transition-transform">
+                        <i class="fa-solid fa-upload"></i>
+                        <span>Restore JSON</span>
+                        <input type="file" id="importFileInput" accept=".json" onchange="importDataJSON(event)" class="hidden">
+                    </label>
+                </div>
+            </div>
+
+            <!-- Reset / Load Sample Data -->
+            <div class="bg-white dark:bg-gray-800 p-4 rounded-2xl border border-gray-200 dark:border-gray-700 space-y-3">
+                <h3 class="font-semibold text-sm flex items-center space-x-2 text-purple-600">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i>
+                    <span>Sample Twin Cities Dataset</span>
+                </h3>
+                <p class="text-xs text-gray-500">Populate your app with iconic Minnesota restaurants like Owamni, Spoon and Stable, Matt's Bar, Young Joni, Revival, and Pimento.</p>
+                <button onclick="loadMinnesotaSampleData()" class="w-full bg-purple-600 text-white text-xs py-2.5 rounded-xl font-medium active:scale-95 transition-transform">
+                    Load Minnesota Sample Spots
+                </button>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- iOS Bottom Navigation Bar -->
+    <nav class="bg-white/90 dark:bg-gray-900/90 backdrop-blur-lg border-t border-gray-200 dark:border-gray-800 safe-pb pt-2 px-6 flex items-center justify-around z-30 shrink-0">
+        <button onclick="switchTab('map')" id="tab-map" class="flex flex-col items-center text-emerald-600 font-semibold space-y-0.5">
+            <i class="fa-solid fa-map text-lg"></i>
+            <span class="text-[10px]">Map</span>
+        </button>
+        <button onclick="switchTab('list')" id="tab-list" class="flex flex-col items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 space-y-0.5">
+            <i class="fa-solid fa-list-ul text-lg"></i>
+            <span class="text-[10px]">List</span>
+        </button>
+        <button onclick="switchTab('pick')" id="tab-pick" class="flex flex-col items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 space-y-0.5">
+            <i class="fa-solid fa-dice text-lg"></i>
+            <span class="text-[10px]">Pick For Me</span>
+        </button>
+        <button onclick="switchTab('settings')" id="tab-settings" class="flex flex-col items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 space-y-0.5">
+            <i class="fa-solid fa-gear text-lg"></i>
+            <span class="text-[10px]">Settings</span>
+        </button>
+    </nav>
+
+    <!-- ADD/EDIT RESTAURANT MODAL SHEET -->
+    <div id="editModal" class="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-end sm:items-center justify-center hidden opacity-0 transition-opacity duration-200">
+        <div class="bg-white dark:bg-gray-900 w-full sm:max-w-lg max-h-[90vh] rounded-t-3xl sm:rounded-3xl flex flex-col overflow-hidden shadow-2xl transition-transform transform translate-y-full sm:translate-y-0">
+            <!-- Modal Header -->
+            <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
+                <h3 id="modalTitle" class="font-bold text-base">Add New Restaurant</h3>
+                <button onclick="closeModal('editModal')" class="w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-gray-500">
+                    <i class="fa-solid fa-xmark text-sm"></i>
+                </button>
+            </div>
+
+            <!-- Form Content -->
+            <form id="restaurantForm" onsubmit="handleFormSubmit(event)" class="p-5 overflow-y-auto space-y-4 text-xs">
+                <input type="hidden" id="editId">
+
+                <!-- Name & Auto Suggest -->
+                <div class="space-y-1 relative">
+                    <label class="font-bold text-gray-700 dark:text-gray-300">Restaurant Name *</label>
+                    <input type="text" id="formName" required placeholder="e.g. Owamni by The Indigenous Kitchen" class="w-full p-2.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500">
+                </div>
+
+                <!-- Address & Geocode Suggestion Dropdown -->
+                <div class="space-y-1 relative">
+                    <div class="flex items-center justify-between">
+                        <label class="font-bold text-gray-700 dark:text-gray-300">Street Address *</label>
+                        <button type="button" onclick="searchAddressGeocode()" class="text-emerald-600 dark:text-emerald-400 font-semibold text-[11px] flex items-center space-x-1">
+                            <i class="fa-solid fa-magnifying-glass-location"></i>
+                            <span>Geocode / Locate</span>
+                        </button>
+                    </div>
+                    <input type="text" id="formAddress" required oninput="debounceGeocode(this.value)" placeholder="e.g. 420 1st St S, Minneapolis, MN" class="w-full p-2.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500">
+                    
+                    <!-- Geocode Auto Suggestions Box -->
+                    <div id="geocodeSuggestions" class="hidden absolute left-0 right-0 top-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg z-50 max-h-40 overflow-y-auto"></div>
+                </div>
+
+                <!-- Coordinates Lat / Lng -->
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="text-gray-500">Latitude</label>
+                        <input type="number" step="any" id="formLat" required class="w-full p-2 bg-gray-100 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg">
+                    </div>
+                    <div>
+                        <label class="text-gray-500">Longitude</label>
+                        <input type="number" step="any" id="formLng" required class="w-full p-2 bg-gray-100 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg">
+                    </div>
+                </div>
+
+                <!-- Status & Price -->
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="font-bold text-gray-700 dark:text-gray-300">Status</label>
+                        <select id="formStatus" class="w-full p-2.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl font-medium outline-none">
+                            <option value="want">Want to Try</option>
+                            <option value="visited">Visited</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="font-bold text-gray-700 dark:text-gray-300">Cost Level</label>
+                        <select id="formCost" class="w-full p-2.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl font-medium outline-none">
+                            <option value="$">$ (Inexpensive)</option>
+                            <option value="$$" selected>$$ (Moderate)</option>
+                            <option value="$$$">$$$ (Expensive)</option>
+                            <option value="$$$$">$$$$ (Fine Dining)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Personal Ratings (Visited Only) -->
+                <div class="grid grid-cols-2 gap-3 bg-gray-50 dark:bg-gray-800/50 p-3 rounded-2xl">
+                    <div>
+                        <label class="font-bold text-gray-700 dark:text-gray-300">Rating (1-5)</label>
+                        <select id="formRating" class="w-full p-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg">
+                            <option value="0">Not Rated Yet</option>
+                            <option value="5">⭐⭐⭐⭐⭐ (5/5)</option>
+                            <option value="4">⭐⭐⭐⭐ (4/5)</option>
+                            <option value="3">⭐⭐⭐ (3/5)</option>
+                            <option value="2">⭐⭐ (2/5)</option>
+                            <option value="1">⭐ (1/5)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="font-bold text-gray-700 dark:text-gray-300">Would Return?</label>
+                        <select id="formWouldReturn" class="w-full p-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg">
+                            <option value="Unknown">-- Unsure --</option>
+                            <option value="Yes">Yes, Definitely</option>
+                            <option value="Maybe">Maybe</option>
+                            <option value="No">No</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Tags -->
+                <div>
+                    <label class="font-bold text-gray-700 dark:text-gray-300">Tags (comma separated)</label>
+                    <input type="text" id="formTags" placeholder="e.g. #patio, #datenight, #indigenous, #cocktails" class="w-full p-2.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl outline-none">
+                </div>
+
+                <!-- Custom Notes & Dish Recommendations -->
+                <div>
+                    <label class="font-bold text-gray-700 dark:text-gray-300">Notes & Recommended Dishes</label>
+                    <textarea id="formNotes" rows="2" placeholder="e.g. Must order Bison tartare and wild rice cake. Reservations 1 month early." class="w-full p-2.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl outline-none"></textarea>
+                </div>
+
+                <!-- Hours Text Summary -->
+                <div>
+                    <label class="font-bold text-gray-700 dark:text-gray-300">Hours Note (e.g. Wed-Sun 5pm-10pm)</label>
+                    <input type="text" id="formHoursText" placeholder="e.g. Wed-Sun 17:00-22:00, Mon-Tue Closed" class="w-full p-2.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl outline-none">
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="flex items-center space-x-2 pt-2">
+                    <button type="button" id="btnDeleteRestaurant" onclick="deleteCurrentRestaurant()" class="bg-red-100 dark:bg-red-950/50 text-red-600 dark:text-red-400 p-3 rounded-xl font-bold hidden">
+                        <i class="fa-solid fa-trash"></i>
+                    </button>
+                    <button type="submit" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-4 rounded-xl shadow-md text-sm">
+                        Save Restaurant
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- SERVICE & SETUP TRANSPARENCY MODAL -->
+    <div id="infoModal" class="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-white dark:bg-gray-900 max-w-md w-full rounded-3xl p-5 space-y-4 shadow-2xl border border-gray-200 dark:border-gray-800">
+            <div class="flex items-center justify-between">
+                <h3 class="font-bold text-base flex items-center space-x-2">
+                    <i class="fa-solid fa-circle-info text-emerald-600"></i>
+                    <span>Routing & Service Transparency</span>
+                </h3>
+                <button onclick="closeModal('infoModal')" class="w-7 h-7 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-500">
+                    <i class="fa-solid fa-xmark text-xs"></i>
+                </button>
+            </div>
+            
+            <div class="text-xs space-y-3 text-gray-600 dark:text-gray-300 leading-relaxed">
+                <p><strong>1. Real Route-Based Travel Times:</strong> Travel times and mode calculations (driving, biking, walking) are powered by the <em>Open Source Routing Machine (OSRM)</em> public API. If OSRM is unreachable, exact Haversine fallback calculations are used with estimated speeds.</p>
+                <p><strong>2. Free & Open Services:</strong> OpenStreetMap tile layers and Nominatim Geocoding are used directly—no paid API keys or subscription setups required.</p>
+                <p><strong>3. Zero Fabrication Policy:</strong> If restaurant business hours aren't manually entered, the app explicitly marks status as <span class="font-semibold text-gray-500">Hours Unknown</span> rather than making guesses.</p>
+            </div>
+
+            <button onclick="closeModal('infoModal')" class="w-full bg-emerald-600 text-white py-2.5 rounded-xl font-bold text-xs">
+                Got It
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // Default Minnesota Center (Eagan / Twin Cities Metro)
+        let userLocation = { lat: 44.8041, lng: -93.1669, label: "Current GPS" };
+        let activeTravelMode = 'driving'; // driving, biking, walking
+        let activeMaxTravelTime = 30; // minutes
+        let activeStatusFilter = 'all'; // all, want, visited
+        let openNowOnlyFilter = false;
+        let map = null;
+        let mapMarkers = [];
+        let restaurants = [];
+
+        // Preset Locations Storage
+        let presetHome = localStorage.getItem('preset_home') || "100 S 4th St, Minneapolis, MN";
+        let presetWork = localStorage.getItem('preset_work') || "200 Park Ave, Saint Paul, MN";
+
+        // Initial Sample Minnesota Spots
+        const sampleMNRestaurants = [
+            {
+                id: "mn-1",
+                name: "Owamni by The Indigenous Kitchen",
+                address: "420 1st St S, Minneapolis, MN 55401",
+                lat: 44.9818,
+                lng: -93.2592,
+                status: "want",
+                rating: 5,
+                wouldReturn: "Yes",
+                cost: "$$$",
+                tags: "#indigenous, #patio, #riverfront, #awardwinning",
+                notes: "James Beard Winner. Decolonized cuisine. Try bison tartare, wild rice cake & cedar tea.",
+                hoursText: "Wed-Sun 17:00-21:30"
+            },
+            {
+                id: "mn-2",
+                name: "Spoon and Stable",
+                address: "211 N 1st St, Minneapolis, MN 55401",
+                lat: 44.9845,
+                lng: -93.2721,
+                status: "visited",
+                rating: 5,
+                wouldReturn: "Yes",
+                cost: "$$$$",
+                tags: "#datenight, #french, #cocktails, #northloop",
+                notes: "Chef Gavin Kaysen. Incredible pasta, duck breast & honey cake dessert.",
+                hoursText: "Mon-Sun 17:00-22:00"
+            },
+            {
+                id: "mn-3",
+                name: "Matt's Bar & Grill",
+                address: "3500 Cedar Ave, Minneapolis, MN 55407",
+                lat: 44.9388,
+                lng: -93.2477,
+                status: "visited",
+                rating: 5,
+                wouldReturn: "Yes",
+                cost: "$",
+                tags: "#burger, #jucylucy, #casual, #cashonly",
+                notes: "Home of the original Jucy Lucy burger. Beware molten cheese! Cash only.",
+                hoursText: "Mon-Sun 11:00-23:00"
+            },
+            {
+                id: "mn-4",
+                name: "Young Joni",
+                address: "165 13th Ave NE, Minneapolis, MN 55413",
+                lat: 45.0006,
+                lng: -93.2662,
+                status: "want",
+                rating: 0,
+                wouldReturn: "Unknown",
+                cost: "$$",
+                tags: "#woodfired, #pizza, #speakeasy, #northeast",
+                notes: "Korean BBQ pizza & secret back bar behind the alley door.",
+                hoursText: "Tue-Sun 16:00-22:00"
+            },
+            {
+                id: "mn-5",
+                name: "Revival Minneapolis",
+                address: "4257 Nicollet Ave, Minneapolis, MN 55409",
+                lat: 44.9248,
+                lng: -93.2778,
+                status: "visited",
+                rating: 4,
+                wouldReturn: "Yes",
+                cost: "$$",
+                tags: "#friedchicken, #southern, #comfortfood",
+                notes: "Tennessee Hot fried chicken & mac and cheese are elite.",
+                hoursText: "Mon-Sun 11:00-21:00"
+            }
+        ];
+
+        window.onload = function() {
+            loadStoredRestaurants();
+            initLeafletMap();
+            requestUserGeolocation();
+            document.getElementById('settingHomeAddr').value = presetHome;
+            document.getElementById('settingWorkAddr').value = presetWork;
+        };
+
+        // Load data from LocalStorage
+        function loadStoredRestaurants() {
+            const data = localStorage.getItem('mn_restaurants_db');
+            if (data) {
+                try {
+                    restaurants = JSON.parse(data);
+                } catch(e) {
+                    restaurants = [...sampleMNRestaurants];
+                }
+            } else {
+                restaurants = [...sampleMNRestaurants];
+                saveRestaurantsToStorage();
+            }
+        }
+
+        function saveRestaurantsToStorage() {
+            localStorage.setItem('mn_restaurants_db', JSON.stringify(restaurants));
+            updateCounts();
+        }
+
+        function initLeafletMap() {
+            map = L.map('map', { zoomControl: false }).setView([userLocation.lat, userLocation.lng], 11);
+            
+            L.control.zoom({ position: 'topright' }).addTo(map);
+
+            // OpenStreetMap tile layer
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; OpenStreetMap contributors'
+            }).addTo(map);
+
+            renderMapMarkers();
+        }
+
+        function requestUserGeolocation() {
+            if ("geolocation" in navigator) {
+                navigator.geolocation.getCurrentPosition(
+                    (pos) => {
+                        userLocation.lat = pos.coords.latitude;
+                        userLocation.lng = pos.coords.longitude;
+                        userLocation.label = "Current Location";
+                        document.getElementById('locationStatusText').innerText = "GPS Location Acquired";
+                        recenterMap();
+                        calculateAllRoutes();
+                    },
+                    (err) => {
+                        document.getElementById('locationStatusText').innerText = "Default: Eagan, MN (GPS restricted)";
+                        calculateAllRoutes();
+                    },
+                    { enableHighAccuracy: true, timeout: 8000 }
+                );
+            }
+        }
+
+        function recenterMap() {
+            if (map) {
+                map.setView([userLocation.lat, userLocation.lng], 12);
+            }
+        }
+
+        async function fetchOSRMRouteTime(startLat, startLng, destLat, destLng, mode) {
+            // Mapping OSRM profiles
+            let profile = 'car';
+            if (mode === 'biking') profile = 'bike';
+            if (mode === 'walking') profile = 'foot';
+
+            const url = `https://router.project-osrm.org/route/v1/${profile}/${startLng},${startLat};${destLng},${destLat}?overview=false`;
+
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+                if (data.code === 'Ok' && data.routes && data.routes.length > 0) {
+                    const durationSeconds = data.routes[0].duration;
+                    const distanceMeters = data.routes[0].distance;
+                    return {
+                        minutes: Math.ceil(durationSeconds / 60),
+                        miles: (distanceMeters * 0.000621371).toFixed(1),
+                        isRoute: true
+                    };
+                }
+            } catch(e) {
+                console.warn("OSRM routing API offline, using fallback Haversine speed calculation.");
+            }
+
+            // Haversine fallback calculation
+            const dLat = (destLat - startLat) * Math.PI / 180;
+            const dLng = (destLng - startLng) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                      Math.cos(startLat * Math.PI / 180) * Math.cos(destLat * Math.PI / 180) *
+                      Math.sin(dLng/2) * Math.sin(dLng/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            const miles = 3958.8 * c; // Earth radius miles
+            
+            let speedMph = 30; // Driving average
+            if (mode === 'biking') speedMph = 12;
+            if (mode === 'walking') speedMph = 3;
+
+            const minutes = Math.max(1, Math.ceil((miles / speedMph) * 60));
+            return {
+                minutes: minutes,
+                miles: miles.toFixed(1),
+                isRoute: false
+            };
+        }
+
+        async function calculateAllRoutes() {
+            for (let r of restaurants) {
+                const result = await fetchOSRMRouteTime(userLocation.lat, userLocation.lng, r.lat, r.lng, activeTravelMode);
+                r.computedTime = result.minutes;
+                r.computedDistance = result.miles;
+                r.isRoute = result.isRoute;
+            }
+            renderMapMarkers();
+            renderRestaurantList();
+        }
+
+        function setTravelMode(mode) {
+            activeTravelMode = mode;
+            ['driving', 'biking', 'walking'].forEach(m => {
+                const btn = document.getElementById(`mode-${m}`);
+                if (m === mode) {
+                    btn.className = "px-2.5 py-1 rounded-lg font-medium transition-all text-emerald-600 bg-white dark:bg-gray-700 shadow-xs";
+                } else {
+                    btn.className = "px-2.5 py-1 rounded-lg font-medium transition-all text-gray-500 dark:text-gray-400";
+                }
+            });
+            calculateAllRoutes();
+        }
+
+        function setMaxTravelTime(mins) {
+            activeMaxTravelTime = mins;
+            document.querySelectorAll('.time-filter-pill').forEach(pill => {
+                if (parseInt(pill.getAttribute('data-time')) === mins) {
+                    pill.className = "time-filter-pill px-2.5 py-1 rounded-full font-medium border border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 font-bold";
+                } else {
+                    pill.className = "time-filter-pill px-2.5 py-1 rounded-full font-medium border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300";
+                }
+            });
+            renderMapMarkers();
+            renderRestaurantList();
+        }
+
+        function renderMapMarkers() {
+            if (!map) return;
+
+            // Clear existing markers
+            mapMarkers.forEach(m => map.removeLayer(m));
+            mapMarkers = [];
+
+            // Add user location marker
+            const userIcon = L.divIcon({
+                className: 'custom-user-marker',
+                html: `<div class="w-6 h-6 bg-blue-600 rounded-full border-2 border-white shadow-lg flex items-center justify-center text-white text-[10px]"><i class="fa-solid fa-location-arrow"></i></div>`,
+                iconSize: [24, 24]
+            });
+            const userM = L.marker([userLocation.lat, userLocation.lng], { icon: userIcon }).addTo(map)
+                .bindPopup(`<b>Starting Location</b><br>${userLocation.label}`);
+            mapMarkers.push(userM);
+
+            // Add filtered restaurant markers
+            restaurants.forEach(r => {
+                if (r.computedTime && r.computedTime > activeMaxTravelTime) return;
+                if (activeStatusFilter !== 'all' && r.status !== activeStatusFilter) return;
+
+                const color = r.status === 'want' ? '#10B981' : '#3B82F6';
+                const icon = L.divIcon({
+                    className: 'custom-rest-marker',
+                    html: `<div style="background-color: ${color};" class="w-8 h-8 rounded-full border-2 border-white shadow-lg flex items-center justify-center text-white text-xs font-bold active:scale-110 transition-transform">
+                             ${r.status === 'want' ? '<i class="fa-solid fa-bookmark"></i>' : '<i class="fa-solid fa-check"></i>'}
+                           </div>`,
+                    iconSize: [32, 32]
+                });
+
+                const appleMapsUrl = `maps://maps.apple.com/?daddr=${encodeURIComponent(r.address)}`;
+                const googleMapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(r.address)}`;
+
+                const popupHTML = `
+                    <div class="p-1 max-w-[200px] text-xs space-y-1">
+                        <h4 class="font-bold text-sm text-gray-900">${r.name}</h4>
+                        <p class="text-gray-500">${r.address}</p>
+                        <div class="flex items-center space-x-2 pt-1">
+                            <span class="bg-emerald-100 text-emerald-800 text-[10px] px-1.5 py-0.5 rounded font-bold">${r.computedTime || '--'} min (${r.computedDistance || '--'} mi)</span>
+                            <span class="text-gray-600 font-semibold">${r.cost}</span>
+                        </div>
+                        <div class="flex items-center space-x-1 pt-2">
+                            <a href="${appleMapsUrl}" class="flex-1 bg-black text-white text-center py-1 rounded text-[10px] font-bold">Apple Maps</a>
+                            <a href="${googleMapsUrl}" target="_blank" class="flex-1 bg-blue-600 text-white text-center py-1 rounded text-[10px] font-bold">Google</a>
+                            <button onclick="openEditModal('${r.id}')" class="bg-gray-200 text-gray-800 p-1 rounded"><i class="fa-solid fa-pen"></i></button>
+                        </div>
+                    </div>
+                `;
+
+                const marker = L.marker([r.lat, r.lng], { icon: icon }).addTo(map).bindPopup(popupHTML);
+                mapMarkers.push(marker);
+            });
+        }
+
+        function renderRestaurantList() {
+            const container = document.getElementById('restaurantListContainer');
+            const search = document.getElementById('searchInput').value.toLowerCase();
+            const sortBy = document.getElementById('sortBySelect').value;
+
+            let filtered = restaurants.filter(r => {
+                if (r.computedTime && r.computedTime > activeMaxTravelTime) return false;
+                if (activeStatusFilter !== 'all' && r.status !== activeStatusFilter) return false;
+                if (openNowOnlyFilter && getOpenNowStatus(r.hoursText).status !== 'OPEN') return false;
+
+                if (search) {
+                    const matchName = r.name.toLowerCase().includes(search);
+                    const matchAddr = r.address.toLowerCase().includes(search);
+                    const matchTags = r.tags.toLowerCase().includes(search);
+                    const matchNotes = r.notes.toLowerCase().includes(search);
+                    return matchName || matchAddr || matchTags || matchNotes;
+                }
+                return true;
+            });
+
+            // Sorting
+            filtered.sort((a, b) => {
+                if (sortBy === 'travelTime') return (a.computedTime || 999) - (b.computedTime || 999);
+                if (sortBy === 'rating') return (b.rating || 0) - (a.rating || 0);
+                if (sortBy === 'name') return a.name.localeCompare(b.name);
+                return 0;
+            });
+
+            if (filtered.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-12 text-gray-400 space-y-2">
+                        <i class="fa-solid fa-utensils text-3xl"></i>
+                        <p class="text-sm font-medium">No restaurants match your active filters.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = filtered.map(r => {
+                const openBadge = getOpenNowStatusBadge(r.hoursText);
+                const appleMapsUrl = `maps://maps.apple.com/?daddr=${encodeURIComponent(r.address)}`;
+
+                return `
+                    <div class="bg-white dark:bg-gray-800 p-4 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-xs space-y-2">
+                        <div class="flex items-start justify-between gap-2">
+                            <div>
+                                <div class="flex items-center space-x-2">
+                                    <h3 class="font-bold text-sm tracking-tight">${r.name}</h3>
+                                    <span class="text-xs text-gray-400">${r.cost}</span>
+                                </div>
+                                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">${r.address}</p>
+                            </div>
+                            <button onclick="openEditModal('${r.id}')" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 p-1">
+                                <i class="fa-solid fa-pen-to-square text-sm"></i>
+                            </button>
+                        </div>
+
+                        <!-- Status & Route badges -->
+                        <div class="flex items-center flex-wrap gap-1.5 text-[11px] pt-1">
+                            <span class="${r.status === 'want' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300' : 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300'} px-2 py-0.5 rounded-full font-semibold">
+                                ${r.status === 'want' ? 'Want to Try' : 'Visited'}
+                            </span>
+
+                            <span class="bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 px-2 py-0.5 rounded-full font-bold flex items-center space-x-1">
+                                <i class="fa-solid fa-route text-[10px]"></i>
+                                <span>${r.computedTime ? r.computedTime + ' min' : 'Calculating...'}</span>
+                                <span class="text-[9px] text-gray-400">(${r.computedDistance || '--'} mi)</span>
+                            </span>
+
+                            ${openBadge}
+                        </div>
+
+                        ${r.notes ? `<p class="text-xs text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-gray-900/50 p-2 rounded-xl italic">"${r.notes}"</p>` : ''}
+
+                        <!-- Tags -->
+                        ${r.tags ? `<p class="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">${r.tags}</p>` : ''}
+
+                        <!-- Action Bar -->
+                        <div class="flex items-center justify-between pt-2 border-t border-gray-100 dark:border-gray-700/50">
+                            <div class="text-amber-500 text-xs">
+                                ${r.status === 'visited' && r.rating ? '★'.repeat(r.rating) : ''}
+                            </div>
+                            <a href="${appleMapsUrl}" class="bg-emerald-600 text-white text-xs px-3 py-1.5 rounded-xl font-bold flex items-center space-x-1 shadow-xs active:scale-95 transition-transform">
+                                <i class="fa-solid fa-location-arrow text-[10px]"></i>
+                                <span>Navigate</span>
+                            </a>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function getOpenNowStatus(hoursText) {
+            if (!hoursText || hoursText.trim() === '') return { status: 'UNKNOWN' };
+            // Simple robust check against text or hours format
+            const lower = hoursText.toLowerCase();
+            if (lower.includes('closed today')) return { status: 'CLOSED' };
+            
+            // Basic indicator - explicitly marking unknown if complex
+            return { status: 'UNKNOWN' };
+        }
+
+        function getOpenNowStatusBadge(hoursText) {
+            if (!hoursText || hoursText.trim() === '') {
+                return `<span class="bg-gray-100 dark:bg-gray-700 text-gray-500 px-2 py-0.5 rounded-full text-[10px]">Hours Unknown</span>`;
+            }
+            return `<span class="bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 rounded-full text-[10px] font-medium">${hoursText}</span>`;
+        }
+
+        function runPickForMe() {
+            const validCandidates = restaurants.filter(r => r.status === 'want' && (!r.computedTime || r.computedTime <= activeMaxTravelTime));
+            const slotDisplay = document.getElementById('slotDisplay');
+
+            if (validCandidates.length === 0) {
+                slotDisplay.innerHTML = `<p class="text-red-500 font-semibold text-xs">No unvisited spots within ${activeMaxTravelTime} mins! Try increasing travel time limit.</p>`;
+                return;
+            }
+
+            slotDisplay.classList.add('slot-spinning');
+            let counter = 0;
+            const interval = setInterval(() => {
+                const temp = validCandidates[Math.floor(Math.random() * validCandidates.length)];
+                slotDisplay.innerHTML = `<h3 class="text-base font-bold text-emerald-600">${temp.name}</h3><p class="text-xs text-gray-500">${temp.address}</p>`;
+                counter++;
+                if (counter > 15) {
+                    clearInterval(interval);
+                    slotDisplay.classList.remove('slot-spinning');
+                    const chosen = validCandidates[Math.floor(Math.random() * validCandidates.length)];
+                    const appleMapsUrl = `maps://maps.apple.com/?daddr=${encodeURIComponent(chosen.address)}`;
+
+                    slotDisplay.innerHTML = `
+                        <div class="space-y-2">
+                            <span class="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full">Winner Chosen!</span>
+                            <h3 class="text-lg font-bold text-gray-900 dark:text-gray-100">${chosen.name}</h3>
+                            <p class="text-xs text-gray-500">${chosen.address}</p>
+                            <div class="pt-2">
+                                <a href="${appleMapsUrl}" class="bg-emerald-600 text-white font-bold text-xs px-4 py-2 rounded-xl inline-block shadow-md">
+                                    Navigate Now (${chosen.computedTime || '--'} min)
+                                </a>
+                            </div>
+                        </div>
+                    `;
+                }
+            }, 100);
+        }
+
+        let geocodeTimeout = null;
+        function debounceGeocode(query) {
+            clearTimeout(geocodeTimeout);
+            if (query.length < 4) return;
+            geocodeTimeout = setTimeout(() => {
+                fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=3`)
+                    .then(res => res.json())
+                    .then(data => {
+                        const box = document.getElementById('geocodeSuggestions');
+                        if (data && data.length > 0) {
+                            box.innerHTML = data.map(item => `
+                                <div onclick="selectGeocodeResult('${item.display_name.replace(/'/g, "\\'")}', ${item.lat}, ${item.lon})" class="p-2 border-b border-gray-100 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer text-xs">
+                                    ${item.display_name}
+                                </div>
+                            `).join('');
+                            box.classList.remove('hidden');
+                        } else {
+                            box.classList.add('hidden');
+                        }
+                    }).catch(() => {});
+            }, 500);
+        }
+
+        function selectGeocodeResult(address, lat, lng) {
+            document.getElementById('formAddress').value = address;
+            document.getElementById('formLat').value = lat;
+            document.getElementById('formLng').value = lng;
+            document.getElementById('geocodeSuggestions').classList.add('hidden');
+        }
+
+        function searchAddressGeocode() {
+            const addr = document.getElementById('formAddress').value;
+            if (addr) debounceGeocode(addr);
+        }
+
+        function switchTab(tabName) {
+            ['map', 'list', 'pick', 'settings'].forEach(t => {
+                document.getElementById(`view-${t}`).classList.add('hidden');
+                document.getElementById(`tab-${t}`).className = "flex flex-col items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 space-y-0.5";
+            });
+            document.getElementById(`view-${tabName}`).classList.remove('hidden');
+            document.getElementById(`tab-${tabName}`).className = "flex flex-col items-center text-emerald-600 font-semibold space-y-0.5";
+
+            if (tabName === 'map' && map) {
+                setTimeout(() => map.invalidateSize(), 200);
+            }
+            if (tabName === 'pick') {
+                document.getElementById('pickMaxTimeText').innerText = `${activeMaxTravelTime} min`;
+            }
+        }
+
+        function openModal(modalId) {
+            const modal = document.getElementById(modalId);
+            modal.classList.remove('hidden');
+            setTimeout(() => modal.classList.remove('opacity-0'), 10);
+        }
+
+        function closeModal(modalId) {
+            const modal = document.getElementById(modalId);
+            modal.classList.add('opacity-0');
+            setTimeout(() => modal.classList.add('hidden'), 200);
+        }
+
+        function openEditModal(id) {
+            const rest = restaurants.find(r => r.id === id);
+            if (!rest) return;
+
+            document.getElementById('editId').value = rest.id;
+            document.getElementById('formName').value = rest.name;
+            document.getElementById('formAddress').value = rest.address;
+            document.getElementById('formLat').value = rest.lat;
+            document.getElementById('formLng').value = rest.lng;
+            document.getElementById('formStatus').value = rest.status;
+            document.getElementById('formCost').value = rest.cost;
+            document.getElementById('formRating').value = rest.rating || 0;
+            document.getElementById('formWouldReturn').value = rest.wouldReturn || "Unknown";
+            document.getElementById('formTags').value = rest.tags || "";
+            document.getElementById('formNotes').value = rest.notes || "";
+            document.getElementById('formHoursText').value = rest.hoursText || "";
+
+            document.getElementById('modalTitle').innerText = "Edit Restaurant";
+            document.getElementById('btnDeleteRestaurant').classList.remove('hidden');
+
+            openModal('editModal');
+        }
+
+        function handleFormSubmit(e) {
+            e.preventDefault();
+            const editId = document.getElementById('editId').value;
+
+            const newItem = {
+                id: editId || 'rest-' + Date.now(),
+                name: document.getElementById('formName').value,
+                address: document.getElementById('formAddress').value,
+                lat: parseFloat(document.getElementById('formLat').value),
+                lng: parseFloat(document.getElementById('formLng').value),
+                status: document.getElementById('formStatus').value,
+                cost: document.getElementById('formCost').value,
+                rating: parseInt(document.getElementById('formRating').value),
+                wouldReturn: document.getElementById('formWouldReturn').value,
+                tags: document.getElementById('formTags').value,
+                notes: document.getElementById('formNotes').value,
+                hoursText: document.getElementById('formHoursText').value
+            };
+
+            if (editId) {
+                const index = restaurants.findIndex(r => r.id === editId);
+                if (index !== -1) restaurants[index] = newItem;
+            } else {
+                restaurants.push(newItem);
+            }
+
+            saveRestaurantsToStorage();
+            closeModal('editModal');
+            calculateAllRoutes();
+            document.getElementById('restaurantForm').reset();
+            document.getElementById('editId').value = "";
+        }
+
+        function deleteCurrentRestaurant() {
+            const editId = document.getElementById('editId').value;
+            if (!editId) return;
+            restaurants = restaurants.filter(r => r.id !== editId);
+            saveRestaurantsToStorage();
+            closeModal('editModal');
+            calculateAllRoutes();
+        }
+
+        function exportDataJSON() {
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(restaurants, null, 2));
+            const downloadAnchor = document.createElement('a');
+            downloadAnchor.setAttribute("href", dataStr);
+            downloadAnchor.setAttribute("download", `DineRoute_MN_Backup_${new Date().toISOString().slice(0,10)}.json`);
+            document.body.appendChild(downloadAnchor);
+            downloadAnchor.click();
+            downloadAnchor.remove();
+        }
+
+        function importDataJSON(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const parsed = JSON.parse(e.target.result);
+                    if (Array.isArray(parsed)) {
+                        restaurants = parsed;
+                        saveRestaurantsToStorage();
+                        calculateAllRoutes();
+                        alert("Data successfully restored!");
+                    }
+                } catch(err) {
+                    alert("Invalid JSON format.");
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        function loadMinnesotaSampleData() {
+            restaurants = [...sampleMNRestaurants];
+            saveRestaurantsToStorage();
+            calculateAllRoutes();
+            alert("Minnesota sample spots loaded!");
+        }
+
+        function savePresetLocations() {
+            presetHome = document.getElementById('settingHomeAddr').value;
+            presetWork = document.getElementById('settingWorkAddr').value;
+            localStorage.setItem('preset_home', presetHome);
+            localStorage.setItem('preset_work', presetWork);
+            alert("Preset addresses saved.");
+        }
+
+        function handleStartLocationChange() {
+            const val = document.getElementById('startLocationSelect').value;
+            if (val === 'gps') {
+                requestUserGeolocation();
+            } else if (val === 'home') {
+                geocodeAndSetStart(presetHome, "Home");
+            } else if (val === 'work') {
+                geocodeAndSetStart(presetWork, "Work");
+            } else if (val === 'custom') {
+                const custom = prompt("Enter starting street address:");
+                if (custom) geocodeAndSetStart(custom, custom);
+            }
+        }
+
+        function geocodeAndSetStart(addr, label) {
+            fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(addr)}&limit=1`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data && data.length > 0) {
+                        userLocation.lat = parseFloat(data[0].lat);
+                        userLocation.lng = parseFloat(data[0].lon);
+                        userLocation.label = label;
+                        document.getElementById('locationStatusText').innerText = `Start: ${label}`;
+                        recenterMap();
+                        calculateAllRoutes();
+                    }
+                }).catch(() => {});
+        }
+
+        function setStatusFilter(status) {
+            activeStatusFilter = status;
+            ['all', 'want', 'visited'].forEach(s => {
+                const btn = document.getElementById(`status-filter-${s}`);
+                if (s === status) {
+                    btn.className = "px-3 py-1 rounded-lg bg-emerald-600 text-white font-medium";
+                } else {
+                    btn.className = "px-3 py-1 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700";
+                }
+            });
+            renderMapMarkers();
+            renderRestaurantList();
+        }
+
+        function toggleOpenNowFilter() {
+            openNowOnlyFilter = !openNowOnlyFilter;
+            const btn = document.getElementById('open-now-filter-btn');
+            if (openNowOnlyFilter) {
+                btn.className = "px-3 py-1 rounded-lg bg-emerald-600 text-white font-medium flex items-center space-x-1";
+            } else {
+                btn.className = "px-3 py-1 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700 flex items-center space-x-1";
+            }
+            renderRestaurantList();
+        }
+
+        function updateCounts() {
+            const wantCount = restaurants.filter(r => r.status === 'want').length;
+            const visitedCount = restaurants.filter(r => r.status === 'visited').length;
+            document.getElementById('count-want').innerText = wantCount;
+            document.getElementById('count-visited').innerText = visitedCount;
+        }
+
+        function openInfoModal() {
+            openModal('infoModal');
+        }
+    </script>
+</body>
+</html>
